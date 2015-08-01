@@ -14,6 +14,7 @@ Xavier Lange
 
   * Independent software contractor
   * Computer engineering background
+    * Working with ViaSat, Inc. on large scale logging
   * Dig the outdoors
   * Cat owner
 
@@ -51,6 +52,14 @@ Lua watching standup comedy
 
 ---
 
+# Today's Talk
+
+ * Background
+ * Analysis of graphite shortcomings
+ * 
+
+---
+
 # Let's Talk Metrics
 
 ---
@@ -68,17 +77,21 @@ Lua watching standup comedy
 
 ## Graphite metric concepts
 
-  (Name, Timestamp, Value)
+ * Long-lived time series
+ * Regular update intervals
+ * Straight-forward naming
+   * one-dimensional
+   * ad-hoc
 
 ---
 
-#### Values
+## Graphite metric concepts
 
-primitive like whoa
-
-    (u32,f64)
+    ( Name, [(Timestamp, Value)] )
 
 ---
+
+### Names
 
 Metric names are primitive
 
@@ -88,6 +101,8 @@ Metric names are primitive
   proglangs.go.community.segfault_questions
 
 ---
+
+### Names
 
 Finding your metrics can get fancy
 
@@ -100,7 +115,81 @@ Yields
 
 ---
 
+#### Values
 
+primitive like whoa
+
+    (u32,f64)
+
+---
+
+### Values
+
+primitive like whoa
+
+    u32: seconds since epoch. SECONDS
+    f64: a number, big or small or in between
+
+---
+
+### Values
+
+what can you possibly store with that?
+
+---
+
+### Values
+
+enough to be dangerous!
+
+---
+
+  TODO: screenshots from elk01
+
+---
+
+## Graphite in Python
+
+Actually 3 core components, whose names I have adopted
+
+  3. Graphite-Web
+  2. Carbon
+  1. Whisper
+
+---
+
+## 3. Graphite-Web
+
+A multi-format web service written on top of Django.
+
+ * Only reads data
+ * HTML interface for rendering queries
+ * REST-y interface
+  * discovering metrics 
+  * querying and delivering JSON, CSV, plaintext, etc
+ * Way more things I haven't used (big code base)
+
+---
+
+2. Carbon
+
+A TCP/UDP daemon for recording datapoints
+
+  * Creates metric storage if necessary
+  * Writes metrics to disk
+  * Handles the life-cycle of resources when writing
+
+---
+
+## Whisper
+
+The most facinating bit for me.
+
+  * Should be simple enough, right?
+  * How hard can it be to write timestamps and points to disk?
+  * Should be easier than writing a ACID MVCC
+    * Like, way easier
+  * ... Rust is fast. Maybe that'll make perf automaticly faster?
 
 ---
 
