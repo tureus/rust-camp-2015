@@ -22,19 +22,19 @@ Xavier Lange
 
 #### My favorite languages, in no particular order
 
-##### OO
+  * OO
 
-Ruby
+    * Ruby
 
-##### Functional
+  * Functional
 
-Erlang
+    * Erlang
+  
+    * Haskell
 
-Haskell
+  * Weird
 
-##### Weird
-
-Rust
+    * Rust
 
 ---
 
@@ -60,18 +60,40 @@ Lua watching standup comedy
 
 <img src="pictures/IMG_0762.JPG" height="500px"/>
 
+note: one example of things working out OK
+
 ---
 
 # Graphite-Rust
 
-  * Experiment that took on a life of it's own
+  * Take a "slow" Python implementation and clone in Rust
   * Built to satisfy some needs at ViaSat, Inc.
    * Love graphite
-   * Hate it's opaque performance problems
+   * Dislike it's opaque performance configuration
    * Troublesome installation
+  * A dash of NIH
   * Supports a private cloud installation and large-ish logging/indexing cluster
 
 Note: http://viasat.github.io/everything-is-logging
+
+---
+
+# Time series as a rust type
+
+Pseudo code
+
+<pre><code data-trim>
+fn main() {
+    let retention = 60*60*24; // one day
+    let mut archive : Vec<(u32,f64)> = Vec::with_capacity(retention);
+
+    let my_series = &mut archive[..];
+    
+    my_series[0] = (1438460243,100.0);
+}
+</code data-trim></pre>
+
+note: I realized I should start by talking Rust. this code isn't quite right.
 
 ---
 
@@ -79,8 +101,7 @@ Note: http://viasat.github.io/everything-is-logging
 
  * Graphite concepts (run don't walk)
  * Analysis of graphite arch shortcomings (brisk walk)
- * Graphite's most popular implementation (run don't walk)
- * The Rust-Graphite implementation (leisurely strole)
+ * The Rust-Graphite implementation (some examples, leisurely strole)
  * Analysis of graphite-rust shortcomings (leisurely strole)
 
 ---
@@ -100,36 +121,22 @@ Note: http://viasat.github.io/everything-is-logging
  * Aggregation
    * StatsD
 
----
-
-# StatsD
-
-Gets a lot of love in the re-implementation area.
-
-Maybe graphite should too?
-
-note: there's a go graphite database implementation which I found later
+note: we're talking primitive metrics/time-series data
 
 ---
 
 ## Graphite metric concepts
 
  * Long-lived time series
+   * Ex: Measure server A's CPU for 2 years
  * Regular update intervals
- * Straight-forward naming
+   * Metric is offered every X seconds (our happy-ish spot: 60s)
+ * Pre-allocated space on disk
+ * Basic metric naming
    * one-dimensional
    * ad-hoc
- * Great ecosystem of tools which can use it
-   * Grafana 1 & 2
-   * Seyren
-   * CollectD for metric collection
-   * sed/awk/nc dreamteam
 
----
-
-## Graphite metric concepts
-
-    ( Name, [(Timestamp, Value)] )
+note: and sed/awk/nc. many shortcomings here. some ambitious databases out there working to address: metric names, distribution. but for me: simple wins
 
 ---
 
@@ -139,7 +146,7 @@ Metric names are primitive
 
 <pre>
   proglangs.rust.community.active_members
-  proglangs.rust.community.borrow_questions
+  proglangs.rust.community.lifetime_questions
   proglangs.go.community.active_members
   proglangs.go.community.segfault_questions
 </pre>
@@ -177,11 +184,13 @@ u32: seconds since epoch. SECONDS
 
 f64: a number, big or small or in between
 
+note: no units on the metrics. sometimes you get lost on what you're measuring.
+
 ---
 
 ### Values
 
-what can you possibly store with that?
+but what can you possibly store with that?
 
 ...
 
@@ -265,9 +274,11 @@ note: should be simple enough, right? how hard can it be to write timestamps and
 
 ### 3. Whisper
 
-  ... Rust is fast. Maybe that'll make perf automaticly faster?
+... Rust is fast. Maybe that'll make perf automaticly faster?
 
-  Turned out to be true
+Turned out to be true
+
+note: I'm not great at buffer management. I don't have a great story for reuse or how to carry them around.
 
 ---
 
@@ -337,6 +348,10 @@ note: expressive, zero-cost, safe
 
 ---
 
+<img src="pictures/IMG_4088.JPG" height="400px"/>
+
+---
+
 ## Case Study: Wrap Around Read
 
 Used in downsampling
@@ -364,7 +379,7 @@ pub fn read_ops<'a> (h_res_archive: &ArchiveInfo,
    )
 </code></pre>
 
-Note: slightly weird code. experiment. prepares buffer for later read.
+Note: h_res 60s, l_res 1hr, need 60 h_res points. uses runtime checks. slightly weird code. experiment. prepares buffer for later read.
 
 ---
 
@@ -389,30 +404,121 @@ if h_res_start_index < h_res_end_index {
 
 ## Is it faster?
 
- * Yes. Duh.
- * 2-3x faster.
+  * Yes. Duh.
+
+  * 2-3x faster.
+
   * Python: spends more time in userland
+
   * Rust: spends more time in syscalls
- * With the same naïve behavior as python
-   * Open file, read headers, close it right away
+
+  * With almost the same naïve behavior as python
+
+  * Poor buffer reuse
+
+  * Open file, read headers, close it right away
 
 note: complicated history here. we were recording too many metrics at too high of a frequency. but apples to apples is good.
 
 ---
 
+## Is it easier to distribute?
+
+Yes. Duh.
+
+<pre><code data-trim>
+$ du -hs target/release/{whisper,carbon,graphite}
+1.1M  target/release/whisper
+1.2M  target/release/carbon
+2.0M  target/release/graphite
+</code></pre>
+
+note: this is the incomplete code I've been describing. but the staticly linked binaries are rad.
+
+---
+
+## Where do we stand in features today?
+
+---
+
 ## Carbon
 
- Start of the WhisperCache
+ Uses of the WhisperCache
 
   * Hold files descriptors for longer
   * Still need eviction
   * Make re-use fast
-  * Does period fsync
-  
+  * Does periodic fsync
+  * Hides creation/reuse
+
+note: fits very well with the lifetime of data. remove from cache will sync and close
 
 ---
 
-Handling lifetime issues is a normal task when writing Rust.
+## Carbon's Cache
+
+<pre><code data-trim>
+pub struct Cache {
+    pub base_path: PathBuf,
+    open_files: HashMap< PathBuf, Box< MutexWhisperFile > >
+}
+</code data-trim></pre>
+
+---
+
+## Graphite
+
+Not very usable. Having issues with my libraries.
+
+You can still use the Python implementation.
+
+---
+
+## Next steps
+
+Keep improving write performance
+
+  * mmap data, manual
+
+  * get better at dtrace
+
+  * carry buffers around
+
+---
+
+## Was rust a good choice?
+
+I don't like to advocate rewrites. Especially since I didn't write the first impl.
+
+Rust has great tooling, tests, benchmarks.
+
+I can use mmap.
+
+I can reuse buffers.
+
+I have a compiler yell at me.
+
+So I'm happy.
+
+note: python implementation has a lot of great features, active maintainers. if you structure your whisper files properly and set your expectations you'll be in good shape.
+
+---
+
+## Anyway
+
+Rendering a ton of metrics is my current bottleneck in JS land
+
+Server side rendering to PNG could be interesting
+
+---
+
+## Thanks
+
+twitter: @tureus
+
+email: xrlange@gmail.com
+
+graphite-rust: https://github.com/tureus/graphite-rust
 
 ---
 
