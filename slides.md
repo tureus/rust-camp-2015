@@ -20,9 +20,31 @@ Xavier Lange
 
 ---
 
+#### My favorite languages, in no particular order
+
+##### OO
+
+Ruby
+
+##### Functional
+
+Erlang
+
+Haskell
+
+##### Weird
+
+Rust
+
+---
+
+<img src="pictures/iangreenleaf-quote.png" height="400px"/>
+
+---
+
 # My cat Lua
 
-Inspiration to stop lounging and go for it.
+Inspiration to stop lounging and go for it
 
 <img src="pictures/IMG_2916.JPG" height="400px"/>
 
@@ -47,16 +69,19 @@ Lua watching standup comedy
    * Love graphite
    * Hate it's opaque performance problems
    * Troublesome installation
-  * Supports a OpenStack cloud installation and large-ish ELK cluster
-  * http://viasat.github.io/everything-is-logging
+  * Supports a private cloud installation and large-ish logging/indexing cluster
+
+Note: http://viasat.github.io/everything-is-logging
 
 ---
 
-# Today's Talk
+# We'll cover
 
- * Background
- * Analysis of graphite shortcomings
- * 
+ * Graphite concepts (run don't walk)
+ * Analysis of graphite arch shortcomings (brisk walk)
+ * Graphite's most popular implementation (run don't walk)
+ * The Rust-Graphite implementation (leisurely strole)
+ * Analysis of graphite-rust shortcomings (leisurely strole)
 
 ---
 
@@ -72,6 +97,18 @@ Lua watching standup comedy
    * Hadoop/Storm
  * High-level
    * Web session heatmaps
+ * Aggregation
+   * StatsD
+
+---
+
+# StatsD
+
+Gets a lot of love in the re-implementation area.
+
+Maybe graphite should too?
+
+note: there's a go graphite database implementation which I found later
 
 ---
 
@@ -82,6 +119,11 @@ Lua watching standup comedy
  * Straight-forward naming
    * one-dimensional
    * ad-hoc
+ * Great ecosystem of tools which can use it
+   * Grafana 1 & 2
+   * Seyren
+   * CollectD for metric collection
+   * sed/awk/nc dreamteam
 
 ---
 
@@ -95,10 +137,12 @@ Lua watching standup comedy
 
 Metric names are primitive
 
+<pre>
   proglangs.rust.community.active_members
   proglangs.rust.community.borrow_questions
   proglangs.go.community.active_members
   proglangs.go.community.segfault_questions
+</pre>
 
 ---
 
@@ -106,12 +150,16 @@ Metric names are primitive
 
 Finding your metrics can get fancy
 
+<pre>
   proglangs.*.community.active_members
+</pre>
 
 Yields
 
+<pre>
   -> proglangs.rust.community.active_members
   -> proglangs.go.community.active_members
+</pre>
 
 ---
 
@@ -125,10 +173,9 @@ primitive like whoa
 
 ### Values
 
-primitive like whoa
+u32: seconds since epoch. SECONDS
 
-    u32: seconds since epoch. SECONDS
-    f64: a number, big or small or in between
+f64: a number, big or small or in between
 
 ---
 
@@ -136,15 +183,23 @@ primitive like whoa
 
 what can you possibly store with that?
 
----
-
-### Values
+...
 
 enough to be dangerous!
 
+note: Coda Hale's Metrics, Metrics, Everywhere
+
 ---
 
-  TODO: screenshots from elk01
+<img src="pictures/grafana-vda-reads.png"></img>
+
+---
+
+<img src="pictures/grafana-long-term-load-with-cluster-resize.png"></img>
+
+---
+
+<img src="pictures/grafana-jvm-heap-use-cluster-resize.png"></img>
 
 ---
 
@@ -158,38 +213,172 @@ Actually 3 core components, whose names I have adopted
 
 ---
 
+## Graphte in Python Installation
+
+Tricky, many components
+
+Run `sudo pip install` or learn the `virtualenv` toolchain
+
+---
+
 ## 3. Graphite-Web
 
 A multi-format web service written on top of Django.
 
- * Only reads data
+ * Least interesting to me
+ * Read-only access to database
  * HTML interface for rendering queries
  * REST-y interface
   * discovering metrics 
-  * querying and delivering JSON, CSV, plaintext, etc
- * Way more things I haven't used (big code base)
+  * querying/transform and delivering
+   * JSON, CSV, plaintext, pickle, etc
+ * Tons of features, hidden gems
 
 ---
 
-2. Carbon
+## 2. Carbon
 
 A TCP/UDP daemon for recording datapoints
 
+  * Moderately interesting to me
   * Creates metric storage if necessary
   * Writes metrics to disk
   * Handles the life-cycle of resources when writing
 
 ---
 
-## Whisper
+## 3. Whisper
 
-The most facinating bit for me.
-
+  * Fascinating
+  * Understands bytes on disk
   * Should be simple enough, right?
   * How hard can it be to write timestamps and points to disk?
   * Should be easier than writing a ACID MVCC
     * Like, way easier
-  * ... Rust is fast. Maybe that'll make perf automaticly faster?
+    * No real query planner
+    * No multi-block joins
+    * No transactions
+
+---
+
+### 3. Whisper
+
+  ... Rust is fast. Maybe that'll make perf automaticly faster?
+
+  Turned out to be true
+
+---
+
+## Digging in to Whisper
+
+---
+
+### Value propagation
+
+<img src="pictures/IMG_4085.JPG"></img>
+
+---
+
+### Invidual Archive
+
+<img src="pictures/IMG_4086.JPG"></img>
+
+---
+
+<pre><code data-trim>
+pub trait WhisperFile {
+    fn open(&amp;Path) -&gt; Result&lt;Self, Error&gt;;
+    fn new(path: &amp;Path, schema: Schema) -&gt; Result&lt;Self, Error&gt;;
+    fn write(&amp;mut self, current_time: u64, point: point::Point);
+}
+</code></pre>
+
+<pre><code data-trim>
+pub struct MutexWhisperFile {
+    pub handle: Mutex&lt;File&gt;,
+    pub header: Header
+}
+</code></pre>
+
+---
+
+<pre><code data-trim>
+// TODO: Don't think we need Copy/Clone.
+// Just added it to make tests easier to write.
+#[derive(PartialEq,Copy,Clone,Debug)]
+pub struct ArchiveInfo {
+    pub offset: SeekFrom,
+    pub seconds_per_point: u64,
+    pub points: u64,
+    pub retention: u64,
+}
+</code></pre>
+
+---
+
+## Tuple Structs
+
+Whisper operation constructs not present in Python
+
+<pre><code data-trim>
+// Index in to an archive, 0..points.len()
+#[derive(Debug, PartialEq, PartialOrd)]
+pub struct ArchiveIndex(pub u64);
+
+// A normalized timestamp
+pub struct BucketName(pub u64);
+</code></pre>
+
+note: expressive, zero-cost, safe
+
+---
+
+## Case Study: Wrap Around Read
+
+Used in downsampling
+
+  1. I like "pure" code
+  2. I was figuring out tangled python
+  3. I wanted to reuse a buffer
+
+---
+
+## Case Study: Wrap Around Read For Downsampling
+
+Type signatures are neat!
+
+<pre><code data-trim>
+pub fn read_ops<'a> (h_res_archive: &ArchiveInfo, 
+                     l_res_archive: &ArchiveInfo,
+                     h_res_points: &'a mut [point::Point],
+                     point_timestamp: u64,
+                     h_res_anchor: BucketName)
+-> (
+             (ArchiveIndex, &'a mut [point::Point]),
+      Option<(ArchiveIndex, &'a mut [point::Point])>
+   )
+</code></pre>
+
+Note: slightly weird code. experiment. prepares buffer for later read.
+
+---
+
+## Case Study: Wrap Around Read
+
+Powered by a favorite: <code data-trim>split_at_mut</code>
+
+<pre><code data-trim>
+// Contiguous read. The easy one.
+if h_res_start_index < h_res_end_index {
+    ((h_res_start_index, &mut h_res_points[..]), None)
+// Wrap-around read
+} else {
+    let split_index = (hres.points - start_index.0) as usize;
+    let (first_buf, second_buf) = points.split_at_mut( split_index );
+    let zero_index = ArchiveIndex(0);
+    ((h_res_start_index, first_buf), Some((zero_index, second_buf)))
+}
+</code></pre>
 
 ---
 
@@ -197,46 +386,82 @@ Handling lifetime issues is a normal task when writing Rust.
 
 ---
 
-But fighting the compiler can be fun. Let's run through an issue
+Let's run through an issue adding the "metric drilldown has children?" feature
 
 ---
 
-Graphite has great discoverability
-Adding read_dir to see if a directory has anything inside it
+Use <code data-trim>read_dir</code> to see if a directory has anything inside it
 
-    read_dir( path_buf ).unwrap().any(|f| {
-        let metadata = f.unwrap().metadata().unwrap();
-        metadata.is_dir() || metadata.is_file()
-    })
+<pre><code data-trim>
+read_dir( path_buf ).unwrap().any(|f| {
+    let metadata = f.unwrap().metadata().unwrap();
+    metadata.is_dir() || metadata.is_file()
+})
+</code></pre>
 
-But oh no! `read_dir( path_buf )` moved ownership of `path_buf`
+---
+
+But oh no!
+
+<code data-trim>read_dir( path_buf )</code> moved ownership of <code data-trim>path_buf</code> and broke later code.
+
+---
 
 What to do? `clone()` is easy. Just throw it in there.
 
-    read_dir( path_buf.clone() ).unwrap().any(|f| {
-        let metadata = f.unwrap().metadata().unwrap();
-        metadata.is_dir() || metadata.is_file()
-    })
+<pre><code data-trim>
+read_dir( path_buf.clone() ).unwrap().any(|f| {
+    let metadata = f.unwrap().metadata().unwrap();
+    metadata.is_dir() || metadata.is_file()
+})
+</code></pre>
 
-Now the code compiles. But we just did a memory copy to generate a simple boolean flag. Let's take a closer look at the stdlib's definition of `read_dir`
+---
 
-    pub fn read_dir<P: AsRef<Path>>(path: P) -> Result<ReadDir>
+# JK
 
-Thas `AsRef` is interesting.
+I try to avoid <code data-trim>clone()</code>. It's more fun that way.
 
-So it just has to "look" like a `Path`? If I recall correctly a `Path` is a slice of a `PathBuf`. And a slice means a `borrow`. The rust compiler was a little heavy handed in how it did the `AsRef`. How about we make it back up and just deal with a borrow? Make it a borrow.
+---
 
-    read_dir( &path_buf ).unwrap().any(|f| {
-        let metadata = f.unwrap().metadata().unwrap();
-        metadata.is_dir() || metadata.is_file()
-    })
+Code compiles but requires a "wasteful" memory copy
 
-Boom! No clone(), no move. Just had to massage the compiler and make sure memory was happy.
+A closer 👀
 
+<pre><code data-trim>
+
+pub fn read_dir&lt;P: AsRef&lt;Path&gt;&gt;(path: P) -> Result&lt;ReadDir&gt;
+
+</code></pre>
+
+---
+
+Thas `AsRef` is interesting
+
+How can I use that...
+
+Note: Remember a Path is a slice of a PathBuf
+
+---
+
+<pre><code data-trim>
+read_dir( &path_buf ).unwrap().any(|f| {
+    let metadata = f.unwrap().metadata().unwrap();
+    metadata.is_dir() || metadata.is_file()
+})
+</code></pre>
+
+Boom! No <code data-trim>clone()</code>, no move.
+
+---
+
+# Not "easy" to be powerful
 
 ----------
+
 Popular libraries have bugs:
 
+<pre><code data-trim>
 ERROR:iron::iron: Error handling:
 Request {
     url: Url { scheme: "http", host: Domain("localhost"), port: 8080, path: ["metrics", "find"], username: None, password: None, query: Some("query=hey.there.*"), fragment: None }
@@ -244,14 +469,18 @@ Request {
     remote_addr: V4(127.0.0.1:56927)
     local_addr: V4(0.0.0.0:8080)
 }
+</code></pre>
 
 https://github.com/hyperium/hyper/issues/540
 
 Stream parsing is hard. Things are rough out there.
 
+---
+
 Things That Have Bugged Me
 
 ----------
+
 Semantics are tricky. Or is that explicit?
 
 When you pass a value by reference you lose it mutability. It makes sense after you've worked with it for a while.
@@ -261,6 +490,7 @@ When you pass a value by reference you lose it mutability. It makes sense after 
     use_the_buf(&buf);
 
 ----------
+
 Type-inference could be stronger
 
     let use_the_buf = {|&mut b : &mut Vec<u8>| b.push(b'a')};
@@ -270,6 +500,7 @@ Type-inference could be stronger
 I would hope `use_the_buf` could infer the type based on the context.
 
 ----------
+
 What did Rust let me do that Python couldn't?
 
 Play detective
