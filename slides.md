@@ -251,13 +251,15 @@ A TCP/UDP daemon for recording datapoints
 
   * Fascinating
   * Understands bytes on disk
-  * Should be simple enough, right?
-  * How hard can it be to write timestamps and points to disk?
+  * Writes points
+   * Through all archives
   * Should be easier than writing a ACID MVCC
     * Like, way easier
     * No real query planner
     * No multi-block joins
     * No transactions
+
+note: should be simple enough, right? how hard can it be to write timestamps and points to disk?
 
 ---
 
@@ -300,6 +302,8 @@ pub struct MutexWhisperFile {
 }
 </code></pre>
 
+note: I'm using some kind of cell to do a runtime mutable borrow
+
 ---
 
 <pre><code data-trim>
@@ -318,7 +322,7 @@ pub struct ArchiveInfo {
 
 ## Tuple Structs
 
-Whisper operation constructs not present in Python
+Whisper constructs not present in Python
 
 <pre><code data-trim>
 // Index in to an archive, 0..points.len()
@@ -337,6 +341,7 @@ note: expressive, zero-cost, safe
 
 Used in downsampling
 
+  1. Example of "read" amplification
   1. I like "pure" code
   2. I was figuring out tangled python
   3. I wanted to reuse a buffer
@@ -379,6 +384,31 @@ if h_res_start_index < h_res_end_index {
     ((h_res_start_index, first_buf), Some((zero_index, second_buf)))
 }
 </code></pre>
+
+---
+
+## Is it faster?
+
+ * Yes. Duh.
+ * 2-3x faster.
+  * Python: spends more time in userland
+  * Rust: spends more time in syscalls
+ * With the same naïve behavior as python
+   * Open file, read headers, close it right away
+
+note: complicated history here. we were recording too many metrics at too high of a frequency. but apples to apples is good.
+
+---
+
+## Carbon
+
+ Start of the WhisperCache
+
+  * Hold files descriptors for longer
+  * Still need eviction
+  * Make re-use fast
+  * Does period fsync
+  
 
 ---
 
@@ -435,71 +465,6 @@ pub fn read_dir&lt;P: AsRef&lt;Path&gt;&gt;(path: P) -> Result&lt;ReadDir&gt;
 </code></pre>
 
 ---
-
-Thas `AsRef` is interesting
-
-How can I use that...
-
-Note: Remember a Path is a slice of a PathBuf
-
----
-
-<pre><code data-trim>
-read_dir( &path_buf ).unwrap().any(|f| {
-    let metadata = f.unwrap().metadata().unwrap();
-    metadata.is_dir() || metadata.is_file()
-})
-</code></pre>
-
-Boom! No <code data-trim>clone()</code>, no move.
-
----
-
-# Not "easy" to be powerful
-
-----------
-
-Popular libraries have bugs:
-
-<pre><code data-trim>
-ERROR:iron::iron: Error handling:
-Request {
-    url: Url { scheme: "http", host: Domain("localhost"), port: 8080, path: ["metrics", "find"], username: None, password: None, query: Some("query=hey.there.*"), fragment: None }
-    method: Extension("target=hey.there.*&from=-6h&until=now&format=json&maxDataPoints=1440GET")
-    remote_addr: V4(127.0.0.1:56927)
-    local_addr: V4(0.0.0.0:8080)
-}
-</code></pre>
-
-https://github.com/hyperium/hyper/issues/540
-
-Stream parsing is hard. Things are rough out there.
-
----
-
-Things That Have Bugged Me
-
-----------
-
-Semantics are tricky. Or is that explicit?
-
-When you pass a value by reference you lose it mutability. It makes sense after you've worked with it for a while.
-
-    let use_the_buf = {|&mut b : &mut Vec<u8>| b.push(b'a')};
-    let mut buf : Vec<u8> = Vec::new();
-    use_the_buf(&buf);
-
-----------
-
-Type-inference could be stronger
-
-    let use_the_buf = {|&mut b : &mut Vec<u8>| b.push(b'a')};
-    let mut buf : Vec<u8> = Vec::new();
-    use_the_buf(&buf);
-
-I would hope `use_the_buf` could infer the type based on the context.
-
-----------
 
 What did Rust let me do that Python couldn't?
 
